@@ -1,7 +1,8 @@
 {
-  "name": "root-and-bloom-cia3",
+  "name": "root-and-bloom-gardening-services",
   "private": true,
   "version": "1.0.0",
+  "description": "CIA III digital business system for Root & Bloom gardening services and retail.",
   "type": "module",
   "scripts": {
     "dev": "vite",

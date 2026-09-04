@@ -172,11 +172,23 @@ export default function App() {
   const [selectedBookingDate, setSelectedBookingDate] = useState('2026-09-10');
   const [selectedZone, setSelectedZone] = useState('Koramangala');
   const [bookingNotes, setBookingNotes] = useState('');
-  const [cart, setCart] = useState<Record<string, number>>({});
+  const [bookingMessage, setBookingMessage] = useState('');
+  const [cart, setCart] = useState<Record<string, number>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('root-bloom-cart') ?? '{}');
+    } catch {
+      return {};
+    }
+  });
+  const [productSearch, setProductSearch] = useState('');
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }, [data]);
+
+  useEffect(() => {
+    localStorage.setItem('root-bloom-cart', JSON.stringify(cart));
+  }, [cart]);
 
   const loggedUser = data.users.find((user) => user.id === selectedUserId) ?? data.users[0];
 
@@ -202,9 +214,19 @@ export default function App() {
     const selectedService = data.services.find((service) => service.id === serviceId);
     if (!selectedService) return;
 
+    const today = new Date().toISOString().slice(0, 10);
+    if (selectedBookingDate < today) {
+      setBookingMessage('Choose today or a future date for your service.');
+      return;
+    }
+    if (bookingNotes.length > 240) {
+      setBookingMessage('Notes must be 240 characters or fewer.');
+      return;
+    }
+
     const assignedGardener = findBestGardener(selectedService, selectedZone, data.gardeners, data.bookings);
     if (!assignedGardener) {
-      alert('No available gardener matches the selected service. Please choose another date or service.');
+      setBookingMessage('No available gardener matches this service. Please choose another option.');
       return;
     }
 
@@ -227,6 +249,7 @@ export default function App() {
 
     setBookingNotes('');
     setServiceId(selectedService.id);
+    setBookingMessage(`Booking confirmed. ${assignedGardener.name} has been assigned.`);
   };
 
   const updateBookingStatus = (bookingId: string, status: Booking['status']) => {
@@ -238,7 +261,7 @@ export default function App() {
     }));
   };
 
-  const deleteBooking = (bookingId: string) => {
+  const cancelBooking = (bookingId: string) => {
     setData((current) => ({
       ...current,
       bookings: current.bookings.filter((booking) => booking.id !== bookingId),
@@ -246,6 +269,8 @@ export default function App() {
   };
 
   const addToCart = (productId: string) => {
+    const product = data.products.find((item) => item.id === productId);
+    if (!product || product.stock <= (cart[productId] ?? 0)) return;
     setCart((current) => ({
       ...current,
       [productId]: (current[productId] ?? 0) + 1,
@@ -262,6 +287,15 @@ export default function App() {
       .filter(Boolean) as OrderItem[];
 
     if (items.length === 0) return;
+
+    const unavailable = items.find((item) => {
+      const product = data.products.find((entry) => entry.id === item.productId);
+      return !product || item.quantity > product.stock;
+    });
+    if (unavailable) {
+      setCart((current) => ({ ...current, [unavailable.productId]: data.products.find((product) => product.id === unavailable.productId)?.stock ?? 0 }));
+      return;
+    }
 
     const total = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
     const order: Order = {
@@ -338,6 +372,9 @@ export default function App() {
     .filter(Boolean) as Array<{ product: Product; quantity: number }>;
 
   const cartTotal = cartItems.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
+  const visibleProducts = data.products.filter((product) =>
+    `${product.name} ${product.category}`.toLowerCase().includes(productSearch.toLowerCase()),
+  );
 
   return (
     <div className="app-shell">
@@ -415,20 +452,30 @@ export default function App() {
                 <textarea value={bookingNotes} onChange={(event) => setBookingNotes(event.target.value)} placeholder="Need watering, pruning or soil treatment?" />
               </label>
               <button type="submit" className="primary-btn">Book Service</button>
+              {bookingMessage && <p className="form-message" role="status">{bookingMessage}</p>}
             </form>
           </section>
 
           <section className="panel shopping-panel">
             <h3>Marketplace</h3>
+            <input
+              className="product-search"
+              value={productSearch}
+              onChange={(event) => setProductSearch(event.target.value)}
+              placeholder="Search plants, tools and supplies"
+              aria-label="Search products"
+            />
             <div className="product-grid">
-              {data.products.map((product) => (
+              {visibleProducts.map((product) => (
                 <div key={product.id} className="product-card">
                   <div className="product-emoji">{product.emoji}</div>
                   <h4>{product.name}</h4>
                   <p>{product.category}</p>
                   <div className="product-row">
                     <span>₹{product.price}</span>
-                    <button onClick={() => addToCart(product.id)}>Add</button>
+                    <button onClick={() => addToCart(product.id)} disabled={product.stock === 0 || (cart[product.id] ?? 0) >= product.stock}>
+                      {product.stock === 0 ? 'Out of stock' : (cart[product.id] ?? 0) >= product.stock ? 'Max added' : 'Add'}
+                    </button>
                   </div>
                 </div>
               ))}
@@ -470,7 +517,7 @@ export default function App() {
                       </div>
                       <div className="status-actions">
                         <span className={`badge ${booking.status.toLowerCase().replace(' ', '-')}`}>{booking.status}</span>
-                        <button onClick={() => deleteBooking(booking.id)}>Delete</button>
+                        {booking.status !== 'Completed' && <button onClick={() => cancelBooking(booking.id)}>Cancel</button>}
                       </div>
                     </div>
                   );
